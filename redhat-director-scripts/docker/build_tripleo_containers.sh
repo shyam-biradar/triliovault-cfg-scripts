@@ -42,7 +42,7 @@ do
       cd $base_dir/${build_dir}/trilio-datamover/
       cp Dockerfile_tripleo${openstack_release} Dockerfile
       docker build --no-cache -t docker.io/trilio/trilio-datamover-tripleo:${tvault_version}-${openstack_release} .
-      podman push docker.io/trilio/trilio-datamover-tripleo:${tvault_version}-${openstack_release}
+      docker push docker.io/trilio/trilio-datamover-tripleo:${tvault_version}-${openstack_release}
 
 
       #Build trilio_datamover-api containers
