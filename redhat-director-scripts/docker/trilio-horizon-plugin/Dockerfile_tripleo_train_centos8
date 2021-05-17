@@ -1,4 +1,4 @@
-FROM docker.io/tripleotrain/centos-binary-horizon:current-tripleo-rdo
+FROM docker.io/tripleotraincentos8/centos-binary-horizon:current-tripleo-rdo
 MAINTAINER TrilioData shyam.biradar@trilio.io
 
 LABEL name="rhosp16/openstack-horizon-triliodata-plugin" \
