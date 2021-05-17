@@ -29,8 +29,8 @@ do
         docker.io/trilio/${container_prefix}-trilio-datamover-api:${tvault_version}
         docker push docker.io/trilio/${container_prefix}-trilio-datamover-api:${tvault_version}
 
-        docker tag trilio/${container_prefix}-trilio-datamover-api:${tvault_version} \
-        docker.io/trilio/${container_prefix}-trilio-datamover-api:${tvault_version}
+        docker tag trilio/${container_prefix}-trilio-datamover:${tvault_version} \
+        docker.io/trilio/${container_prefix}-trilio-datamover:${tvault_version}
         docker push docker.io/trilio/${container_prefix}-trilio-datamover:${tvault_version}
 
         docker tag trilio/${container_prefix}-trilio-horizon-plugin:${tvault_version} \
