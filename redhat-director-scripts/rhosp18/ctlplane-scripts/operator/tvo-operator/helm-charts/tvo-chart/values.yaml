@@ -105,17 +105,7 @@ keystone:
     service_desc: "TrilioVault Workloadmgr Api Service"
     internal_endpoint: "ENDPOINT_PROTOCOL_INTERNAL://ENDPOINT_HOST_INTERNAL:8781/v1/$(tenant_id)s"
     public_endpoint: "ENDPOINT_PROTOCOL_PUBLIC://ENDPOINT_HOST_PUBLIC:8781/v1/$(tenant_id)s"
-    public_auth_host: ""    
-database:
-  common:
-    root_user_name: "root"
-    host: "EDIT_DB_HOSTNAME"
-  datamover_api: 
-    user: "dmapi"
-    database: "dmapi"
-  wlm_api: 
-    user: "workloadmgr"
-    database: "workloadmgr"    
+    public_auth_host: ""       
 rabbitmq:
   common:
     admin_user: "trilio-rabbitmq-admin"
@@ -185,6 +175,50 @@ rabbitmq:
   wlm_api:
     user: "workloadmgr"
     vhost: "workloadmgr"
+database:
+  common:
+    root_user_name: "root"
+    host: "trilio-rabbitmq-cluster.trilio-openstack.svc"
+    port: 3306
+  datamover_api: 
+    user: "dmapi"
+    database: "dmapi"
+  wlm_api: 
+    user: "workloadmgr"
+    database: "workloadmgr"
+  galera: 
+    replicas: 3
+
+    # Storage configuration - matching OpenStack Galera
+    storageClass: ocs-storagecluster-ceph-rbd
+    storageRequest: 20G
+
+    # Secret containing passwords
+    secret: trilio-openstack-secret
+
+    # Container image - RHOSO 18
+    containerImage: registry.redhat.io/rhoso/openstack-mariadb-rhel9:18.0
+
+    # Disable disk logging like OpenStack Galera
+    logToDisk: false
+
+    # Resource limits and requests for production workloads
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+
+    # TLS configuration - using CA bundle approach like OpenStack
+    tls:
+      caBundleSecretName: combined-ca-bundle
+      secretName: cert-trilio-galera-cluster
+
+    # Node selector for dedicated database nodes (optional)
+    nodeSelector:
+      node-role.kubernetes.io/worker: ""
 triliovault_backup_target:
   backup_target_name: 'S3_BT1'
   backup_target_type: 's3'

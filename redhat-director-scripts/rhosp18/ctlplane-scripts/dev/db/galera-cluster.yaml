@@ -10,17 +10,20 @@ metadata:
 spec:
   # Galera cluster configuration
   replicas: 3
-  
-  # Storage configuration for persistent data
-  storageClass: local-storage
-  storageRequest: 10Gi
-  
+
+  # Storage configuration - matching OpenStack Galera
+  storageClass: ocs-storagecluster-ceph-rbd
+  storageRequest: 20G
+
   # Secret containing passwords
-  secret: galera-db-secret
-  
-  # Container image - using RHOSO 18 certified image
+  secret: trilio-openstack-secret
+
+  # Container image - RHOSO 18
   containerImage: registry.redhat.io/rhoso/openstack-mariadb-rhel9:18.0
-  
+
+  # Disable disk logging like OpenStack Galera
+  logToDisk: false
+
   # Resource limits and requests for production workloads
   resources:
     requests:
@@ -29,67 +32,25 @@ spec:
     limits:
       cpu: "4"
       memory: 8Gi
-  
-  # Galera-specific configuration
-  galera:
-    enabled: true
-    
-  # Custom configuration options
-  customServiceConfig: |
-    [mysqld]
-    # Galera cluster settings
-    wsrep_cluster_name=galera_cluster
-    wsrep_on=ON
-    wsrep_provider=/usr/lib64/galera-4/libgalera_smm.so
-    wsrep_slave_threads=4
-    
-    # InnoDB settings for production
-    innodb_buffer_pool_size=2G
-    innodb_log_file_size=512M
-    innodb_flush_log_at_trx_commit=2
-    innodb_flush_method=O_DIRECT
-    innodb_file_per_table=ON
-    
-    # Connection and performance tuning
-    max_connections=1000
-    max_allowed_packet=256M
-    thread_cache_size=128
-    table_open_cache=4096
-    query_cache_size=0
-    query_cache_type=0
-    
-    # Binary logging for point-in-time recovery
-    log_bin=mysql-bin
-    binlog_format=ROW
-    expire_logs_days=7
-    sync_binlog=1
-    
-    # Character set
-    character_set_server=utf8mb4
-    collation_server=utf8mb4_unicode_ci
-    
-    # Slow query log for monitoring
-    slow_query_log=1
-    slow_query_log_file=/var/log/mariadb/slow.log
-    long_query_time=2
-    
-    # Security settings
-    local_infile=0
-    
-  # Network policies
-  networkAttachments:
-    - storage
-  
-  # TLS configuration for encrypted connections
+
+  # TLS configuration - using CA bundle approach like OpenStack
   tls:
-    enabled: true
+    caBundleSecretName: combined-ca-bundle
     secretName: cert-trilio-galera-cluster
-    
-  # Database service configuration
-  services:
-    - internal
-    - public
-  
+
   # Node selector for dedicated database nodes (optional)
   nodeSelector:
     node-role.kubernetes.io/worker: ""
+
+  # Pod anti-affinity to spread replicas across nodes
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - galera
+          topologyKey: kubernetes.io/hostname
