@@ -26,5 +26,4 @@ spec:
   source: {{ .Values.rabbitmq.operator.source }}
   sourceNamespace: {{ .Values.rabbitmq.operator.source_namespace }}
   installPlanApproval: {{ .Values.rabbitmq.operator.install_plan_approval }}
-  startingCSV: {{ .Values.rabbitmq.operator.starting_csv }}
 {{- end }}

@@ -167,7 +167,6 @@ spec:
       api_version: 'operators.coreos.com/v1'
       operator_name: 'rabbitmq-cluster-operator'
       channel: 'stable'
-      starting_csv: 'rabbitmq-cluster-operator.v2.16.0'
       install_plan_approval: 'Automatic'
       source_namespace: 'openshift-marketplace'
       source: 'community-operators'
