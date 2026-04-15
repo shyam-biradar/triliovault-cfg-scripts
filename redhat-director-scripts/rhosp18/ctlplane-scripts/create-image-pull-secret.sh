@@ -20,5 +20,6 @@ if [ -z "$PASSWORD" ]; then
 fi
 
 oc get secret/pull-secret -n openshift-config -o json | jq -r '.data.".dockerconfigjson"' | base64 -d > authfile
-podman login --authfile authfile --username $USER --password $PASSWORD $REGISTRY
+set +H
+podman login --authfile authfile --username "$USER" --password "$PASSWORD" "$REGISTRY"
 oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=authfile
