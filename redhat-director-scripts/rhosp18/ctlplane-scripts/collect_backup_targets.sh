@@ -21,19 +21,33 @@
 #       get secret openstack-secret in trilio-openstack or openstack namespace
 #   - python3 with PyYAML   (pip3 install pyyaml)
 #   - jq
-#   - tvo-operator-inputs.yaml in the current directory
+#   - tvo-operator-inputs.yaml (path supplied via -i or defaults to ./tvo-operator-inputs.yaml)
 #
 # Usage:
-#   bash collect_backup_targets.sh
+#   bash collect_backup_targets.sh [-i <path/to/tvo-operator-inputs.yaml>]
 #
 # Output:
 #   existing_list_of_backup_targets.yaml  — input for update_backup_targets_62.sh
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+INPUTS_FILE="tvo-operator-inputs.yaml"   # default
+
+while getopts ":i:" opt; do
+  case "${opt}" in
+    i) INPUTS_FILE="${OPTARG}" ;;
+    :) echo "ERROR: -${OPTARG} requires an argument." >&2; exit 1 ;;
+    \?) echo "ERROR: Unknown option -${OPTARG}." >&2
+        echo "Usage: $0 [-i <path/to/tvo-operator-inputs.yaml>]" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
 NAMESPACE="trilio-openstack"
 OPENSTACK_NS="openstack"
-INPUTS_FILE="tvo-operator-inputs.yaml"
 INVENTORY_FILE="existing_list_of_backup_targets.yaml"
 
 log()      { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -56,7 +70,7 @@ done
 python3 -c "import yaml" 2>/dev/null || {
   err "Python3 'yaml' module missing.  Install with: pip3 install pyyaml"; exit 1; }
 [ -f "${INPUTS_FILE}" ] || {
-  err "${INPUTS_FILE} not found in $(pwd)"; exit 1; }
+  err "${INPUTS_FILE} not found"; exit 1; }
 log "All prerequisites satisfied."
 
 # -----------------------------------------------------------------------
@@ -82,10 +96,10 @@ log_step "Step 1: Read backup targets from ${INPUTS_FILE}"
 #
 #       If the section is absent the script logs a notice and moves on.
 
-STATIC_BTS_JSON=$(python3 - <<'PYEOF'
+STATIC_BTS_JSON=$(python3 - "${INPUTS_FILE}" <<'PYEOF'
 import yaml, json, sys
 
-with open("tvo-operator-inputs.yaml") as f:
+with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
 
 spec = doc.get("spec", doc)   # support both wrapped and flat layouts
@@ -97,7 +111,7 @@ for b in spec.get("triliovault_backup_targets", []):
     bt = {
         "name":       b.get("backup_target_name", ""),
         "type":       b.get("backup_target_type", "s3"),
-        "source":     "tvo-operator-inputs.yaml",
+        "source":     sys.argv[1],
         "is_default": b.get("is_default", False),
     }
     if not bt["name"]:
@@ -117,10 +131,10 @@ for b in spec.get("triliovault_backup_targets", []):
     bts.append(bt)
 
 if bts:
-    print(f"[INFO] Total from tvo-operator-inputs.yaml: {len(bts)}", file=sys.stderr)
+    print(f"[INFO] Total from {sys.argv[1]}: {len(bts)}", file=sys.stderr)
 else:
-    print("[INFO] No triliovault_backup_targets section found in "
-          "tvo-operator-inputs.yaml — relying on TVOBackupTarget CRs.",
+    print(f"[INFO] No triliovault_backup_targets section found in "
+          f"{sys.argv[1]} — relying on TVOBackupTarget CRs.",
           file=sys.stderr)
 
 print(json.dumps(bts))
@@ -220,7 +234,7 @@ static_names = {b["name"] for b in static_bts}
 
 for bt in dynamic_bts:
     if bt["name"] in static_names:
-        print(f"[INFO] '{bt['name']}' appears in both tvo-operator-inputs.yaml "
+        print(f"[INFO] '{bt['name']}' appears in both ${INPUTS_FILE} "
               "and as a TVOBackupTarget CR — using CR version.", flush=True)
         all_bts = [b for b in all_bts if b["name"] != bt["name"]]
     all_bts.append(bt)
