@@ -28,7 +28,8 @@ def is_barbican_installed():
         print("Checking if Barbican is installed...")
         result = subprocess.run(
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "barbican"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
@@ -44,7 +45,8 @@ def get_memcached_servers():
         print("Fetching memcached servers...")
         result = subprocess.run(
             ["oc", "-n", "openstack", "get", "memcached", "-o", "jsonpath={.items[*].status.serverList[*]}"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
@@ -72,7 +74,8 @@ def get_keystone_url_by_interface(interface):
                 "openstack", "endpoint", "list",
                 "-f", "value", "-c", "Service Name", "-c", "Interface", "-c", "URL"
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
@@ -96,7 +99,8 @@ def fetch_and_extract_cluster_domain():
         print("Fetching Glance public endpoint...")
         result = subprocess.run(
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "image", "-f", "value", "-c", "URL", "--interface", "public"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             check=True
         )
