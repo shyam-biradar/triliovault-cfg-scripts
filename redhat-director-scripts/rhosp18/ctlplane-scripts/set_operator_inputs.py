@@ -30,7 +30,7 @@ def is_barbican_installed():
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "barbican"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            universal_newlines=True,
             check=True
         )
         installed = "barbican" in result.stdout.lower()
@@ -47,7 +47,7 @@ def get_memcached_servers():
             ["oc", "-n", "openstack", "get", "memcached", "-o", "jsonpath={.items[*].status.serverList[*]}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            universal_newlines=True,
             check=True
         )
         memcached_servers = result.stdout.strip().replace(" ", ",")
@@ -76,7 +76,7 @@ def get_keystone_url_by_interface(interface):
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            universal_newlines=True,
             check=True
         )
 
@@ -101,7 +101,7 @@ def fetch_and_extract_cluster_domain():
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "image", "-f", "value", "-c", "URL", "--interface", "public"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            universal_newlines=True,
             check=True
         )
         glance_url = result.stdout.strip()
