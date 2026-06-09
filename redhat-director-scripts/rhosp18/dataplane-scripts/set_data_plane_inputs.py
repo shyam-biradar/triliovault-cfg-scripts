@@ -1,29 +1,12 @@
 #!/usr/bin/python3
 import yaml
 
-def str_presenter(dumper, data):
-    if "\n" in data:
-        return dumper.represent_scalar(
-            "tag:yaml.org,2002:str",
-            data,
-            style="|"
-        )
-    return dumper.represent_scalar(
-        "tag:yaml.org,2002:str",
-        data
-    )
-
-yaml.add_representer(str, str_presenter)
-
 YAML_FILE = "../ctlplane-scripts/tvo-operator-inputs.yaml"
-SECRET_FILE = "../ctlplane-scripts/trilio-openstack-secret.yaml"
 CM_FILE = "cm-trilio-datamover.yaml"
 
-# Load YAML files
-with open(YAML_FILE) as f:
+# Load YAML file
+with open(YAML_FILE, encoding='utf-8') as f:
     data = yaml.safe_load(f)
-with open(SECRET_FILE) as f:
-    secrets = yaml.safe_load(f)
 
 # Extract data
 rabbit_host = data["spec"]["rabbitmq"]["common"].get("host", "")
@@ -36,34 +19,33 @@ keystone_ssl_verify = data["spec"]["keystone"]["common"].get("ssl_verify", True)
 dms_image = data["spec"]["images"].get("triliovault_dms", "")
 wlm_image = data["spec"]["images"].get("triliovault_wlm", "")
 
-
-# Read and update lines before backup targets
+# Read and update lines
 updated_lines = []
-with open(CM_FILE, "r") as f:
+with open(CM_FILE, "r", encoding='utf-8') as f:
     for line in f:
         if "rabbit_host:" in line:
-            updated_lines.append(f'    rabbit_host: "{rabbit_host}"\n')
+            updated_lines.append('    rabbit_host: "{}"\n'.format(rabbit_host))
         elif "rabbit_ssl:" in line:
-            updated_lines.append(f'    rabbit_ssl: {str(rabbit_ssl).lower()}\n')
+            updated_lines.append('    rabbit_ssl: {}\n'.format(str(rabbit_ssl).lower()))
         elif "rabbit_quorum_queue:" in line:
-            updated_lines.append(f'    rabbit_quorum_queue: {str(rabbit_quorum_queue).lower()}\n')
+            updated_lines.append('    rabbit_quorum_queue: {}\n'.format(str(rabbit_quorum_queue).lower()))
         elif "database_host:" in line:
-            updated_lines.append(f'    database_host: "{database_host}"\n')
+            updated_lines.append('    database_host: "{}"\n'.format(database_host))
         elif "database_port:" in line:
-            updated_lines.append(f'    database_port: "{database_port}"\n')
+            updated_lines.append('    database_port: "{}"\n'.format(database_port))
         elif "keystone_auth_url:" in line:
-            updated_lines.append(f'    keystone_auth_url: "{keystone_auth_url}"\n')
+            updated_lines.append('    keystone_auth_url: "{}"\n'.format(keystone_auth_url))
         elif "keystone_ssl_verify:" in line:
-            updated_lines.append(f'    keystone_ssl_verify: {str(keystone_ssl_verify).lower()}\n')
+            updated_lines.append('    keystone_ssl_verify: {}\n'.format(str(keystone_ssl_verify).lower()))
         elif "triliovault_dms_image:" in line:
-            updated_lines.append(f'    triliovault_dms_image: "{dms_image}"\n')
+            updated_lines.append('    triliovault_dms_image: "{}"\n'.format(dms_image))
         elif "triliovault_wlm_image:" in line:
-            updated_lines.append(f'    triliovault_wlm_image: "{wlm_image}"\n')
+            updated_lines.append('    triliovault_wlm_image: "{}"\n'.format(wlm_image))
         else:
             updated_lines.append(line)
 
-# Write updated header lines back
-with open(CM_FILE, "w") as f:
+# Write updated content back
+with open(CM_FILE, "w", encoding='utf-8') as f:
     f.writelines(updated_lines)
 
 print("Updated rabbit/database/keystone config, image URLs, and backup targets in cm-trilio-datamover.yaml")

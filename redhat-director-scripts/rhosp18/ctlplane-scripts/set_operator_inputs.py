@@ -18,7 +18,7 @@ yaml_parser = YAML()
 yaml_parser.preserve_quotes = True
 yaml_parser.width = 4096
 
-with open(yaml_file, "r") as file:
+with open(yaml_file, "r", encoding='utf-8') as file:
     yaml_data = yaml_parser.load(file)
 
 
@@ -28,8 +28,9 @@ def is_barbican_installed():
         print("Checking if Barbican is installed...")
         result = subprocess.run(
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "barbican"],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=True
         )
         installed = "barbican" in result.stdout.lower()
@@ -44,8 +45,9 @@ def get_memcached_servers():
         print("Fetching memcached servers...")
         result = subprocess.run(
             ["oc", "-n", "openstack", "get", "memcached", "-o", "jsonpath={.items[*].status.serverList[*]}"],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=True
         )
         memcached_servers = result.stdout.strip().replace(" ", ",")
@@ -72,8 +74,9 @@ def get_keystone_url_by_interface(interface):
                 "openstack", "endpoint", "list",
                 "-f", "value", "-c", "Service Name", "-c", "Interface", "-c", "URL"
             ],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=True
         )
 
@@ -96,8 +99,9 @@ def fetch_and_extract_cluster_domain():
         print("Fetching Glance public endpoint...")
         result = subprocess.run(
             ["oc", "rsh", "-n", "openstack", "openstackclient", "openstack", "endpoint", "list", "--service", "image", "-f", "value", "-c", "URL", "--interface", "public"],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
             check=True
         )
         glance_url = result.stdout.strip()
@@ -204,7 +208,7 @@ if keystone_url:
 
 update_keystone_endpoints()
 print("Calling rabbit params method")
-with open(yaml_file, "w") as file:
+with open(yaml_file, "w", encoding='utf-8') as file:
     yaml_parser.dump(yaml_data, file)
 
 print("YAML file tvo-operator-inputs.yaml is updated successfully.")
