@@ -361,9 +361,20 @@ def init_db():
     set_flag('db-sync.pending')
 
 
-@reactive.hook('update-status')
 @reactive.when('db-sync.pending')
 def perform_db_sync():
+    """Actually perform the deferred database sync.
+
+    hook decorators cannot be combined with when/when_not decorators in
+    charms.reactive, so the update-status restriction is enforced here
+    instead: this handler is invoked on every hook once db-sync.pending
+    is set (that's how charms.reactive works), but only actually runs
+    db_sync() once we're in a genuinely separate update-status hook
+    invocation, not still cascading within the same hook dispatch that
+    set the flag.
+    """
+    if hookenv.hook_name() != 'update-status':
+        return
     with charm.provide_charm_instance() as charm_class:
         charm_class.db_sync()
     clear_flag('db-sync.pending')

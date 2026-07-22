@@ -189,7 +189,7 @@ class TestDmapiHandlers(test_utils.PatchHelper):
         self.set_flag.assert_called_once_with('db-sync.pending')
         wlm_charm.db_sync.assert_not_called()
 
-    def test_perform_db_sync_runs_sync_and_clears_flag(self):
+    def test_perform_db_sync_runs_sync_and_clears_flag_on_update_status(self):
         self.patch_object(
             handlers.charm, "provide_charm_instance", new=mock.MagicMock()
         )
@@ -197,6 +197,22 @@ class TestDmapiHandlers(test_utils.PatchHelper):
         self.provide_charm_instance().__enter__.return_value = wlm_charm
         self.provide_charm_instance().__exit__.return_value = None
         self.patch_object(handlers, "clear_flag")
+        self.patch_object(handlers.hookenv, "hook_name")
+        self.hook_name.return_value = 'update-status'
         handlers.perform_db_sync()
         wlm_charm.db_sync.assert_called_once_with()
         self.clear_flag.assert_called_once_with('db-sync.pending')
+
+    def test_perform_db_sync_is_noop_outside_update_status(self):
+        self.patch_object(
+            handlers.charm, "provide_charm_instance", new=mock.MagicMock()
+        )
+        wlm_charm = mock.MagicMock()
+        self.provide_charm_instance().__enter__.return_value = wlm_charm
+        self.provide_charm_instance().__exit__.return_value = None
+        self.patch_object(handlers, "clear_flag")
+        self.patch_object(handlers.hookenv, "hook_name")
+        self.hook_name.return_value = 'identity-service-relation-changed'
+        handlers.perform_db_sync()
+        wlm_charm.db_sync.assert_not_called()
+        self.clear_flag.assert_not_called()
