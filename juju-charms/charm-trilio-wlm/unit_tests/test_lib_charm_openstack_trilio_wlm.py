@@ -246,3 +246,60 @@ class TestTrilioWLMCharmStein41LicenseActions(Helper):
         trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
         with self.assertRaises(trilio_wlm.IdentityServiceIncompleteException):
             trilio_wlm_charm.create_license(identity_service)
+
+
+class TestTrilioWLMCharmStein41DbSync(Helper):
+
+    def setUp(self):
+        super().setUp()
+        self.patch_object(trilio_wlm.hookenv, "is_leader")
+        self.patch_object(trilio_wlm.hookenv, "leader_set")
+        self.patch_object(trilio_wlm.subprocess, "check_call")
+        self.is_leader.return_value = True
+        self.trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
+        self.patch_object(self.trilio_wlm_charm, "db_sync_done")
+        self.patch_object(self.trilio_wlm_charm, "restart_all")
+        self.patch_object(self.trilio_wlm_charm, "_db_schema_is_complete")
+        self.db_sync_done.return_value = False
+
+    def test_db_sync_clean_run(self):
+        self._db_schema_is_complete.return_value = True
+        self.trilio_wlm_charm.db_sync()
+        self.check_call.assert_called_once_with(
+            self.trilio_wlm_charm.sync_cmd)
+        self.leader_set.assert_called_once_with({"db-sync-done": True})
+        self.restart_all.assert_called_once_with()
+
+    def test_db_sync_already_done(self):
+        self.db_sync_done.return_value = True
+        self.trilio_wlm_charm.db_sync()
+        self.check_call.assert_not_called()
+        self.leader_set.assert_not_called()
+        self.restart_all.assert_not_called()
+
+    def test_db_sync_not_leader(self):
+        self.is_leader.return_value = False
+        self.trilio_wlm_charm.db_sync()
+        self.check_call.assert_not_called()
+        self.leader_set.assert_not_called()
+
+    def test_db_sync_repairs_incomplete_schema(self):
+        # First verification (after the initial upgrade head) fails,
+        # second verification (after downgrade base + upgrade head) passes.
+        self._db_schema_is_complete.side_effect = [False, True]
+        self.trilio_wlm_charm.db_sync()
+        sync_cmd = self.trilio_wlm_charm.sync_cmd
+        self.check_call.assert_has_calls([
+            mock.call(sync_cmd),
+            mock.call(sync_cmd[:2] + ["downgrade", "base"]),
+            mock.call(sync_cmd),
+        ])
+        self.leader_set.assert_called_once_with({"db-sync-done": True})
+        self.restart_all.assert_called_once_with()
+
+    def test_db_sync_raises_if_repair_fails(self):
+        self._db_schema_is_complete.return_value = False
+        with self.assertRaises(Exception):
+            self.trilio_wlm_charm.db_sync()
+        self.leader_set.assert_not_called()
+        self.restart_all.assert_not_called()

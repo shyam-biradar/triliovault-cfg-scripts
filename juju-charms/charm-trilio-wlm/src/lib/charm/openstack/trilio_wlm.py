@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+import configparser
 import copy
 import subprocess
+from urllib.parse import urlparse
+
 import charmhelpers.core.hookenv as hookenv
 import charmhelpers.contrib.openstack.utils as os_utils
 import charms_openstack.charm
@@ -187,6 +190,84 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
 
     def get_database_setup(self):
         return [{"database": self.service_type, "username": self.service_type}]
+
+    def _alembic_db_uri(self):
+        """Return the sqlalchemy.url configured in alembic.ini"""
+        parser = configparser.ConfigParser()
+        parser.read(self.alembic_ini)
+        return parser.get("alembic", "sqlalchemy.url")
+
+    def _db_schema_is_complete(self):
+        """Verify a column added by the job-table migration actually exists.
+
+        Works around a race between db_sync and the co-located
+        mysql-router subordinate restarting its router process while the
+        shared-db relation is still settling: alembic can report a clean
+        run (alembic_version at head) while some migrations' DDL was
+        silently not applied, leaving e.g. the job table without its
+        created_at/updated_at/etc columns (TVAULT-7502).
+        """
+        uri = urlparse(self._alembic_db_uri())
+        try:
+            output = subprocess.check_output(
+                [
+                    "mysql",
+                    "--host={}".format(uri.hostname),
+                    "--port={}".format(uri.port or 3306),
+                    "--user={}".format(uri.username),
+                    "--password={}".format(uri.password),
+                    "--batch",
+                    "--skip-column-names",
+                    uri.path.lstrip("/"),
+                    "-e",
+                    "SHOW COLUMNS FROM job LIKE 'created_at'",
+                ],
+                universal_newlines=True,
+            )
+        except subprocess.CalledProcessError as e:
+            hookenv.log(
+                "db_sync schema verification query failed: {}".format(e),
+                level=hookenv.WARNING,
+            )
+            return False
+        return bool(output.strip())
+
+    def db_sync(self):
+        """Perform a database sync using the command defined in the
+        self.sync_cmd attribute, then verify the resulting schema.
+
+        Overrides charms_openstack.charm.OpenStackCharm.db_sync() to add
+        post-sync verification. alembic can exit 0 and record
+        alembic_version at head while some migrations' DDL was not
+        actually applied -- observed when db_sync races with the
+        co-located mysql-router subordinate restarting its router process
+        during initial sync (TVAULT-7502). When that happens, this repairs
+        the schema by forcing alembic to walk the full migration chain
+        again from scratch (downgrade base, then upgrade head). This is
+        only safe because db_sync (gated by the db-sync-done leader
+        setting) runs at most once, on the very first sync of a brand new
+        deployment, before any real data can exist in these tables.
+        """
+        if not self.db_sync_done() and hookenv.is_leader():
+            subprocess.check_call(self.sync_cmd)
+            if not self._db_schema_is_complete():
+                hookenv.log(
+                    "db_sync produced an incomplete schema (job.created_at "
+                    "missing despite alembic_version at head); forcing a "
+                    "downgrade/upgrade cycle to repair it. See TVAULT-7502.",
+                    level=hookenv.WARNING,
+                )
+                subprocess.check_call(
+                    self.sync_cmd[:2] + ["downgrade", "base"])
+                subprocess.check_call(self.sync_cmd)
+                if not self._db_schema_is_complete():
+                    raise Exception(
+                        "workloadmgr database schema is still incomplete "
+                        "after a repair attempt; manual intervention is "
+                        "required. See TVAULT-7502."
+                    )
+            hookenv.leader_set({"db-sync-done": True})
+            self.restart_all()
 
     @property
     def public_url(self):
