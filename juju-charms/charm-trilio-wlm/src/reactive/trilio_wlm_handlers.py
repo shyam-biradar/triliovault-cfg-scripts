@@ -346,8 +346,27 @@ def render_config(*args):
 
 @reactive.when("config.rendered")
 def init_db():
+    """Request a database sync, but don't run it here.
+
+    render_config() (which sets config.rendered) does a lot of work in
+    this same hook -- package install/upgrade, template rendering,
+    service restarts. Running db_sync() (alembic upgrade head) chained
+    inline immediately after all of that, in the same hook dispatch, has
+    been observed to silently under-apply some migrations even though
+    alembic reports success -- while running the identical command as a
+    standalone invocation (manually, or via `juju run`) always succeeds
+    (TVAULT-7502). Deferring the actual sync to the next update-status
+    hook decouples it from that same-hook chain.
+    """
+    set_flag('db-sync.pending')
+
+
+@reactive.hook('update-status')
+@reactive.when('db-sync.pending')
+def perform_db_sync():
     with charm.provide_charm_instance() as charm_class:
         charm_class.db_sync()
+    clear_flag('db-sync.pending')
 
 
 @reactive.when("ha.connected")

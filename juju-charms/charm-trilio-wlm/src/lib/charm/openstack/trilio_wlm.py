@@ -13,11 +13,7 @@
 # limitations under the License.
 import collections
 import copy
-import datetime
-import glob
-import re
 import subprocess
-import time
 
 import charmhelpers.core.hookenv as hookenv
 import charmhelpers.contrib.openstack.utils as os_utils
@@ -192,97 +188,6 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
 
     def get_database_setup(self):
         return [{"database": self.service_type, "username": self.service_type}]
-
-    # The co-located mysql-router subordinate's log, wherever it landed.
-    # There is exactly one such log on this unit's machine/container --
-    # the mysql-router deployed specifically for this charm's shared-db
-    # relation -- so a glob is used instead of hardcoding the mysql-router
-    # application name, which isn't fixed across deployments.
-    _MYSQLROUTER_LOG_GLOB = "/var/lib/mysql/*/log/mysqlrouter.log"
-    _MYSQLROUTER_RESTART_RE = re.compile(
-        r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Starting 'MySQL Router'"
-    )
-
-    def _last_mysqlrouter_restart(self):
-        """Return the datetime of the most recent 'Starting MySQL Router'
-        line in the co-located mysql-router subordinate's log, or None if
-        the log can't be found (e.g. mysql-router hasn't bootstrapped yet).
-        """
-        matches = glob.glob(self._MYSQLROUTER_LOG_GLOB)
-        if not matches:
-            return None
-        last = None
-        try:
-            with open(matches[0]) as f:
-                for line in f:
-                    m = self._MYSQLROUTER_RESTART_RE.match(line)
-                    if m:
-                        last = datetime.datetime.strptime(
-                            m.group(1), "%Y-%m-%d %H:%M:%S")
-        except OSError:
-            return None
-        return last
-
-    # How long mysql-router must go without a further restart before we
-    # consider it settled.
-    _DB_STABLE_QUIET_SECONDS = 60
-    # How often to re-check the log while waiting.
-    _DB_STABLE_POLL_INTERVAL = 5
-    # Give up waiting (and proceed anyway) after this long.
-    _DB_STABLE_MAX_WAIT = 300
-
-    def _wait_for_stable_mysqlrouter(self):
-        """Block until the co-located mysql-router subordinate has not
-        (re)started in at least _DB_STABLE_QUIET_SECONDS, before running
-        db_sync.
-
-        mysql-router rewrites its config and restarts the router process
-        every time mysql-innodb-cluster sends it new db-router relation
-        data -- observed live to happen anywhere from once to several
-        times in quick succession while shared-db is still settling on a
-        fresh deployment. Running alembic upgrade head while that's still
-        happening can silently under-apply some migrations even though
-        alembic reports success (TVAULT-7502). This watches the actual
-        restart events in mysql-router's own log and only proceeds once
-        there has been a genuine quiet period, instead of guessing a fixed
-        delay or verifying and repairing after the fact.
-        """
-        waited = 0
-        while waited < self._DB_STABLE_MAX_WAIT:
-            last_restart = self._last_mysqlrouter_restart()
-            if last_restart is None:
-                return
-            elapsed = (
-                datetime.datetime.now() - last_restart
-            ).total_seconds()
-            if elapsed >= self._DB_STABLE_QUIET_SECONDS:
-                return
-            sleep_for = min(
-                self._DB_STABLE_POLL_INTERVAL,
-                max(1, self._DB_STABLE_QUIET_SECONDS - elapsed),
-            )
-            time.sleep(sleep_for)
-            waited += sleep_for
-        hookenv.log(
-            "Gave up waiting for mysql-router to settle after {}s; "
-            "proceeding with db_sync anyway. See TVAULT-7502.".format(
-                self._DB_STABLE_MAX_WAIT),
-            level=hookenv.WARNING,
-        )
-
-    def db_sync(self):
-        """Perform a database sync using the command defined in the
-        self.sync_cmd attribute.
-
-        Overrides charms_openstack.charm.OpenStackCharm.db_sync() to wait
-        for mysql-router to settle first -- see
-        _wait_for_stable_mysqlrouter for why.
-        """
-        if not self.db_sync_done() and hookenv.is_leader():
-            self._wait_for_stable_mysqlrouter()
-            subprocess.check_call(self.sync_cmd)
-            hookenv.leader_set({"db-sync-done": True})
-            self.restart_all()
 
     @property
     def public_url(self):

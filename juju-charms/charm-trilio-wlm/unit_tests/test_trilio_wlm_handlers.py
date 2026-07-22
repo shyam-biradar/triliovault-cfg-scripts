@@ -105,6 +105,7 @@ class TestDmapiHandlers(test_utils.PatchHelper):
                 "amqp.available",
             ),
             "init_db": ("config.rendered",),
+            "perform_db_sync": ("db-sync.pending",),
             "cluster_connected": ("ha.connected",),
             "register_endpoints_and_request_notification": (
                 "identity-service.connected",),
@@ -175,3 +176,27 @@ class TestDmapiHandlers(test_utils.PatchHelper):
             _admin_url,
             requested_roles=[_trustee_role]
         )
+
+    def test_init_db_requests_sync_without_running_it(self):
+        self.patch_object(
+            handlers.charm, "provide_charm_instance", new=mock.MagicMock()
+        )
+        wlm_charm = mock.MagicMock()
+        self.provide_charm_instance().__enter__.return_value = wlm_charm
+        self.provide_charm_instance().__exit__.return_value = None
+        self.patch_object(handlers, "set_flag")
+        handlers.init_db()
+        self.set_flag.assert_called_once_with('db-sync.pending')
+        wlm_charm.db_sync.assert_not_called()
+
+    def test_perform_db_sync_runs_sync_and_clears_flag(self):
+        self.patch_object(
+            handlers.charm, "provide_charm_instance", new=mock.MagicMock()
+        )
+        wlm_charm = mock.MagicMock()
+        self.provide_charm_instance().__enter__.return_value = wlm_charm
+        self.provide_charm_instance().__exit__.return_value = None
+        self.patch_object(handlers, "clear_flag")
+        handlers.perform_db_sync()
+        wlm_charm.db_sync.assert_called_once_with()
+        self.clear_flag.assert_called_once_with('db-sync.pending')

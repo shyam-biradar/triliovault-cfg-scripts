@@ -13,8 +13,6 @@
 # limitations under the License.
 
 
-import datetime
-
 import mock
 
 import charm.openstack.trilio_wlm as trilio_wlm
@@ -248,94 +246,3 @@ class TestTrilioWLMCharmStein41LicenseActions(Helper):
         trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
         with self.assertRaises(trilio_wlm.IdentityServiceIncompleteException):
             trilio_wlm_charm.create_license(identity_service)
-
-
-class TestTrilioWLMCharmStein41DbSync(Helper):
-
-    def setUp(self):
-        super().setUp()
-        self.patch_object(trilio_wlm.hookenv, "is_leader")
-        self.patch_object(trilio_wlm.hookenv, "leader_set")
-        self.patch_object(trilio_wlm.subprocess, "check_call")
-        self.is_leader.return_value = True
-        self.trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
-        self.patch_object(self.trilio_wlm_charm, "db_sync_done")
-        self.patch_object(self.trilio_wlm_charm, "restart_all")
-        self.patch_object(
-            self.trilio_wlm_charm, "_wait_for_stable_mysqlrouter")
-        self.db_sync_done.return_value = False
-
-    def test_db_sync_clean_run(self):
-        self.trilio_wlm_charm.db_sync()
-        self._wait_for_stable_mysqlrouter.assert_called_once_with()
-        self.check_call.assert_called_once_with(
-            self.trilio_wlm_charm.sync_cmd)
-        self.leader_set.assert_called_once_with({"db-sync-done": True})
-        self.restart_all.assert_called_once_with()
-
-    def test_db_sync_already_done(self):
-        self.db_sync_done.return_value = True
-        self.trilio_wlm_charm.db_sync()
-        self._wait_for_stable_mysqlrouter.assert_not_called()
-        self.check_call.assert_not_called()
-        self.leader_set.assert_not_called()
-        self.restart_all.assert_not_called()
-
-    def test_db_sync_not_leader(self):
-        self.is_leader.return_value = False
-        self.trilio_wlm_charm.db_sync()
-        self._wait_for_stable_mysqlrouter.assert_not_called()
-        self.check_call.assert_not_called()
-        self.leader_set.assert_not_called()
-
-
-class TestTrilioWLMCharmStein41MysqlrouterStability(Helper):
-
-    def setUp(self):
-        super().setUp()
-        self.patch_object(trilio_wlm.hookenv, "log")
-        self.patch_object(trilio_wlm.time, "sleep")
-        self.trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
-        self.patch_object(self.trilio_wlm_charm, "_last_mysqlrouter_restart")
-        self.quiet_seconds = self.trilio_wlm_charm._DB_STABLE_QUIET_SECONDS
-
-    def test_returns_immediately_if_no_log_found(self):
-        self._last_mysqlrouter_restart.return_value = None
-        self.trilio_wlm_charm._wait_for_stable_mysqlrouter()
-        self.sleep.assert_not_called()
-        self.log.assert_not_called()
-
-    def test_returns_once_quiet_window_already_elapsed(self):
-        long_ago = (
-            datetime.datetime.now() -
-            datetime.timedelta(seconds=self.quiet_seconds + 5)
-        )
-        self._last_mysqlrouter_restart.return_value = long_ago
-        self.trilio_wlm_charm._wait_for_stable_mysqlrouter()
-        self.sleep.assert_not_called()
-        self.log.assert_not_called()
-
-    def test_waits_then_returns_once_quiet_window_elapses(self):
-        recent = datetime.datetime.now()
-        long_ago = (
-            datetime.datetime.now() -
-            datetime.timedelta(seconds=self.quiet_seconds + 5)
-        )
-        # First check: mysql-router just restarted -- not stable yet.
-        # Second check: far enough in the past -- stable now.
-        self._last_mysqlrouter_restart.side_effect = [recent, long_ago]
-        self.trilio_wlm_charm._wait_for_stable_mysqlrouter()
-        self.sleep.assert_called_once()
-        self.log.assert_not_called()
-
-    def test_gives_up_after_max_wait(self):
-        # mysql-router appears to have "just restarted" on every check.
-        self._last_mysqlrouter_restart.side_effect = (
-            lambda: datetime.datetime.now())
-        self.trilio_wlm_charm._wait_for_stable_mysqlrouter()
-        expected_iterations = (
-            self.trilio_wlm_charm._DB_STABLE_MAX_WAIT //
-            self.trilio_wlm_charm._DB_STABLE_POLL_INTERVAL
-        )
-        self.assertEqual(self.sleep.call_count, expected_iterations)
-        self.log.assert_called_once()
