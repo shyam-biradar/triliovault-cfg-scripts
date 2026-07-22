@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+import configparser
 import copy
+import os
 import subprocess
+from urllib.parse import urlparse
 
 import charmhelpers.core.hookenv as hookenv
 import charmhelpers.contrib.openstack.utils as os_utils
@@ -188,6 +191,64 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
 
     def get_database_setup(self):
         return [{"database": self.service_type, "username": self.service_type}]
+
+    def _debug_dump_sync_context(self, label):
+        """TEMPORARY diagnostic instrumentation for TVAULT-7502.
+
+        Logs exactly what environment/binary db_sync is about to use (or
+        just used), plus the live job table columns, so we have direct
+        evidence from inside the actual failing process instead of
+        inferring from outside. Remove once the root cause is confirmed.
+        """
+        try:
+            which_alembic = subprocess.check_output(
+                ["which", "alembic"], universal_newlines=True
+            ).strip()
+        except Exception as e:
+            which_alembic = "ERROR: {}".format(e)
+        env_bits = {
+            k: os.environ.get(k)
+            for k in ("PATH", "PYTHONPATH", "VIRTUAL_ENV", "HOME", "USER")
+        }
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(self.alembic_ini)
+            uri = urlparse(parser.get("alembic", "sqlalchemy.url"))
+            job_columns = subprocess.check_output(
+                [
+                    "mysql",
+                    "--host={}".format(uri.hostname),
+                    "--port={}".format(uri.port or 3306),
+                    "--user={}".format(uri.username),
+                    "--password={}".format(uri.password),
+                    "--batch", "--skip-column-names",
+                    uri.path.lstrip("/"),
+                    "-e", "SHOW COLUMNS FROM job",
+                ],
+                stderr=subprocess.STDOUT, universal_newlines=True,
+            ).strip()
+        except Exception as e:
+            job_columns = "ERROR: {}".format(e)
+        hookenv.log(
+            "TVAULT-7502 DEBUG [{}]: cwd={} which_alembic={} env={} "
+            "job_columns={!r}".format(
+                label, os.getcwd(), which_alembic, env_bits, job_columns),
+            level=hookenv.WARNING,
+        )
+
+    def db_sync(self):
+        """TEMPORARY: instrumented db_sync for TVAULT-7502 diagnosis.
+
+        Wraps the base charms_openstack.charm.OpenStackCharm.db_sync()
+        behaviour with before/after diagnostic dumps. Revert to the
+        plain inherited method once the root cause is confirmed.
+        """
+        if not self.db_sync_done() and hookenv.is_leader():
+            self._debug_dump_sync_context('before-alembic')
+            subprocess.check_call(self.sync_cmd)
+            self._debug_dump_sync_context('after-alembic')
+            hookenv.leader_set({"db-sync-done": True})
+            self.restart_all()
 
     @property
     def public_url(self):
