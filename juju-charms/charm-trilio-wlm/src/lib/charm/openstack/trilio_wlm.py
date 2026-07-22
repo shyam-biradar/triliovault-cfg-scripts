@@ -232,6 +232,14 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
             return False
         return bool(output.strip())
 
+    # Revision immediately before migration 016 creates the job table.
+    # Migrations below this point (e.g. 006_snap_network_resources_cascading)
+    # deliberately raise NotImplementedError() from their downgrade(), so a
+    # full "downgrade base" aborts partway through and leaves the schema in
+    # a worse state -- confirmed while validating this fix. 015 is also the
+    # exact revision QA's own manual recovery downgraded to successfully.
+    _DB_REPAIR_BASE_REVISION = "015"
+
     def db_sync(self):
         """Perform a database sync using the command defined in the
         self.sync_cmd attribute, then verify the resulting schema.
@@ -242,11 +250,12 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
         actually applied -- observed when db_sync races with the
         co-located mysql-router subordinate restarting its router process
         during initial sync (TVAULT-7502). When that happens, this repairs
-        the schema by forcing alembic to walk the full migration chain
-        again from scratch (downgrade base, then upgrade head). This is
-        only safe because db_sync (gated by the db-sync-done leader
-        setting) runs at most once, on the very first sync of a brand new
-        deployment, before any real data can exist in these tables.
+        the schema by forcing alembic to walk the migration chain again
+        from just before the job table is created (downgrade to
+        _DB_REPAIR_BASE_REVISION, then upgrade head). This is only safe
+        because db_sync (gated by the db-sync-done leader setting) runs at
+        most once, on the very first sync of a brand new deployment,
+        before any real data can exist in these tables.
         """
         if not self.db_sync_done() and hookenv.is_leader():
             subprocess.check_call(self.sync_cmd)
@@ -258,7 +267,8 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
                     level=hookenv.WARNING,
                 )
                 subprocess.check_call(
-                    self.sync_cmd[:2] + ["downgrade", "base"])
+                    self.sync_cmd[:2] +
+                    ["downgrade", self._DB_REPAIR_BASE_REVISION])
                 subprocess.check_call(self.sync_cmd)
                 if not self._db_schema_is_complete():
                     raise Exception(

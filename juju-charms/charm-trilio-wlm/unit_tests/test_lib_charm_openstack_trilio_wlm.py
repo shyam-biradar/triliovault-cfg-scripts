@@ -291,7 +291,7 @@ class TestTrilioWLMCharmStein41DbSync(Helper):
         sync_cmd = self.trilio_wlm_charm.sync_cmd
         self.check_call.assert_has_calls([
             mock.call(sync_cmd),
-            mock.call(sync_cmd[:2] + ["downgrade", "base"]),
+            mock.call(sync_cmd[:2] + ["downgrade", "015"]),
             mock.call(sync_cmd),
         ])
         self.leader_set.assert_called_once_with({"db-sync-done": True})
