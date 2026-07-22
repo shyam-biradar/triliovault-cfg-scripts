@@ -15,6 +15,7 @@ import collections
 import configparser
 import copy
 import subprocess
+import time
 from urllib.parse import urlparse
 
 import charmhelpers.core.hookenv as hookenv
@@ -197,85 +198,85 @@ class TrilioWLMBaseCharm(charms_openstack.plugins.TrilioVaultCharm):
         parser.read(self.alembic_ini)
         return parser.get("alembic", "sqlalchemy.url")
 
-    def _db_schema_is_complete(self):
-        """Verify a column added by the job-table migration actually exists.
-
-        Works around a race between db_sync and the co-located
-        mysql-router subordinate restarting its router process while the
-        shared-db relation is still settling: alembic can report a clean
-        run (alembic_version at head) while some migrations' DDL was
-        silently not applied, leaving e.g. the job table without its
-        created_at/updated_at/etc columns (TVAULT-7502).
+    def _db_connection_ok(self):
+        """Return True if a lightweight query succeeds against the DB
+        right now, via the same local connection alembic will use.
         """
         uri = urlparse(self._alembic_db_uri())
         try:
-            output = subprocess.check_output(
+            subprocess.check_output(
                 [
                     "mysql",
                     "--host={}".format(uri.hostname),
                     "--port={}".format(uri.port or 3306),
                     "--user={}".format(uri.username),
                     "--password={}".format(uri.password),
-                    "--batch",
-                    "--skip-column-names",
-                    uri.path.lstrip("/"),
+                    "--connect-timeout=3",
                     "-e",
-                    "SHOW COLUMNS FROM job LIKE 'created_at'",
+                    "SELECT 1",
                 ],
-                universal_newlines=True,
+                stderr=subprocess.STDOUT,
             )
-        except subprocess.CalledProcessError as e:
-            hookenv.log(
-                "db_sync schema verification query failed: {}".format(e),
-                level=hookenv.WARNING,
-            )
+            return True
+        except subprocess.CalledProcessError:
             return False
-        return bool(output.strip())
 
-    # Revision immediately before migration 016 creates the job table.
-    # Migrations below this point (e.g. 006_snap_network_resources_cascading)
-    # deliberately raise NotImplementedError() from their downgrade(), so a
-    # full "downgrade base" aborts partway through and leaves the schema in
-    # a worse state -- confirmed while validating this fix. 015 is also the
-    # exact revision QA's own manual recovery downgraded to successfully.
-    _DB_REPAIR_BASE_REVISION = "015"
+    # How long the local DB connection must stay up without a single
+    # failed check before we consider mysql-router settled.
+    _DB_STABLE_QUIET_SECONDS = 15
+    # How often to poll while waiting.
+    _DB_STABLE_POLL_INTERVAL = 2
+    # Give up waiting (and proceed anyway) after this long.
+    _DB_STABLE_MAX_WAIT = 90
+
+    def _wait_for_stable_db_connection(self):
+        """Block until the local DB connection has been reachable
+        continuously for _DB_STABLE_QUIET_SECONDS before running db_sync.
+
+        The co-located mysql-router subordinate rewrites its config and
+        restarts the router process every time mysql-innodb-cluster sends
+        it new db-router relation data -- observed to happen anywhere from
+        once (~8s total) to several times in quick succession (~30s total)
+        while shared-db is still settling on a fresh deployment. Running
+        alembic upgrade head while that's still happening can silently
+        under-apply some migrations even though alembic reports success
+        (TVAULT-7502). Waiting for a quiet window here, instead of
+        verifying and repairing after the fact, avoids running the
+        migration during that window in the first place.
+        """
+        required_consecutive = max(
+            1,
+            self._DB_STABLE_QUIET_SECONDS // self._DB_STABLE_POLL_INTERVAL,
+        )
+        consecutive_ok = 0
+        waited = 0
+        while waited < self._DB_STABLE_MAX_WAIT:
+            if self._db_connection_ok():
+                consecutive_ok += 1
+                if consecutive_ok >= required_consecutive:
+                    return
+            else:
+                consecutive_ok = 0
+            time.sleep(self._DB_STABLE_POLL_INTERVAL)
+            waited += self._DB_STABLE_POLL_INTERVAL
+        hookenv.log(
+            "Gave up waiting for a stable DB connection after {}s; "
+            "proceeding with db_sync anyway. See TVAULT-7502.".format(
+                self._DB_STABLE_MAX_WAIT),
+            level=hookenv.WARNING,
+        )
 
     def db_sync(self):
         """Perform a database sync using the command defined in the
-        self.sync_cmd attribute, then verify the resulting schema.
+        self.sync_cmd attribute.
 
-        Overrides charms_openstack.charm.OpenStackCharm.db_sync() to add
-        post-sync verification. alembic can exit 0 and record
-        alembic_version at head while some migrations' DDL was not
-        actually applied -- observed when db_sync races with the
-        co-located mysql-router subordinate restarting its router process
-        during initial sync (TVAULT-7502). When that happens, this repairs
-        the schema by forcing alembic to walk the migration chain again
-        from just before the job table is created (downgrade to
-        _DB_REPAIR_BASE_REVISION, then upgrade head). This is only safe
-        because db_sync (gated by the db-sync-done leader setting) runs at
-        most once, on the very first sync of a brand new deployment,
-        before any real data can exist in these tables.
+        Overrides charms_openstack.charm.OpenStackCharm.db_sync() to wait
+        for a stable DB connection first -- see
+        _wait_for_stable_db_connection for why.
         """
         if not self.db_sync_done() and hookenv.is_leader():
+            self._wait_for_stable_db_connection()
             subprocess.check_call(self.sync_cmd)
-            if not self._db_schema_is_complete():
-                hookenv.log(
-                    "db_sync produced an incomplete schema (job.created_at "
-                    "missing despite alembic_version at head); forcing a "
-                    "downgrade/upgrade cycle to repair it. See TVAULT-7502.",
-                    level=hookenv.WARNING,
-                )
-                subprocess.check_call(
-                    self.sync_cmd[:2] +
-                    ["downgrade", self._DB_REPAIR_BASE_REVISION])
-                subprocess.check_call(self.sync_cmd)
-                if not self._db_schema_is_complete():
-                    raise Exception(
-                        "workloadmgr database schema is still incomplete "
-                        "after a repair attempt; manual intervention is "
-                        "required. See TVAULT-7502."
-                    )
             hookenv.leader_set({"db-sync-done": True})
             self.restart_all()
 

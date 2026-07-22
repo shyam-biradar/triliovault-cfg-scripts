@@ -259,12 +259,13 @@ class TestTrilioWLMCharmStein41DbSync(Helper):
         self.trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
         self.patch_object(self.trilio_wlm_charm, "db_sync_done")
         self.patch_object(self.trilio_wlm_charm, "restart_all")
-        self.patch_object(self.trilio_wlm_charm, "_db_schema_is_complete")
+        self.patch_object(
+            self.trilio_wlm_charm, "_wait_for_stable_db_connection")
         self.db_sync_done.return_value = False
 
     def test_db_sync_clean_run(self):
-        self._db_schema_is_complete.return_value = True
         self.trilio_wlm_charm.db_sync()
+        self._wait_for_stable_db_connection.assert_called_once_with()
         self.check_call.assert_called_once_with(
             self.trilio_wlm_charm.sync_cmd)
         self.leader_set.assert_called_once_with({"db-sync-done": True})
@@ -273,6 +274,7 @@ class TestTrilioWLMCharmStein41DbSync(Helper):
     def test_db_sync_already_done(self):
         self.db_sync_done.return_value = True
         self.trilio_wlm_charm.db_sync()
+        self._wait_for_stable_db_connection.assert_not_called()
         self.check_call.assert_not_called()
         self.leader_set.assert_not_called()
         self.restart_all.assert_not_called()
@@ -280,26 +282,48 @@ class TestTrilioWLMCharmStein41DbSync(Helper):
     def test_db_sync_not_leader(self):
         self.is_leader.return_value = False
         self.trilio_wlm_charm.db_sync()
+        self._wait_for_stable_db_connection.assert_not_called()
         self.check_call.assert_not_called()
         self.leader_set.assert_not_called()
 
-    def test_db_sync_repairs_incomplete_schema(self):
-        # First verification (after the initial upgrade head) fails,
-        # second verification (after downgrade base + upgrade head) passes.
-        self._db_schema_is_complete.side_effect = [False, True]
-        self.trilio_wlm_charm.db_sync()
-        sync_cmd = self.trilio_wlm_charm.sync_cmd
-        self.check_call.assert_has_calls([
-            mock.call(sync_cmd),
-            mock.call(sync_cmd[:2] + ["downgrade", "015"]),
-            mock.call(sync_cmd),
-        ])
-        self.leader_set.assert_called_once_with({"db-sync-done": True})
-        self.restart_all.assert_called_once_with()
 
-    def test_db_sync_raises_if_repair_fails(self):
-        self._db_schema_is_complete.return_value = False
-        with self.assertRaises(Exception):
-            self.trilio_wlm_charm.db_sync()
-        self.leader_set.assert_not_called()
-        self.restart_all.assert_not_called()
+class TestTrilioWLMCharmStein41DbConnectionStability(Helper):
+
+    def setUp(self):
+        super().setUp()
+        self.patch_object(trilio_wlm.hookenv, "log")
+        self.patch_object(trilio_wlm.time, "sleep")
+        self.trilio_wlm_charm = trilio_wlm.TrilioWLMCharmStein41()
+        self.patch_object(self.trilio_wlm_charm, "_db_connection_ok")
+        self.required = (
+            self.trilio_wlm_charm._DB_STABLE_QUIET_SECONDS //
+            self.trilio_wlm_charm._DB_STABLE_POLL_INTERVAL
+        )
+
+    def test_returns_once_quiet_window_reached(self):
+        self._db_connection_ok.return_value = True
+        self.trilio_wlm_charm._wait_for_stable_db_connection()
+        self.assertEqual(self._db_connection_ok.call_count, self.required)
+        self.log.assert_not_called()
+
+    def test_resets_on_failure_then_recovers(self):
+        # Succeeds most of the way, fails once (simulating a mysql-router
+        # restart), then has to build up a fresh quiet window from there.
+        self._db_connection_ok.side_effect = (
+            [True] * (self.required - 1) + [False] + [True] * self.required
+        )
+        self.trilio_wlm_charm._wait_for_stable_db_connection()
+        self.assertEqual(
+            self._db_connection_ok.call_count,
+            (self.required - 1) + 1 + self.required)
+        self.log.assert_not_called()
+
+    def test_gives_up_after_max_wait(self):
+        self._db_connection_ok.return_value = False
+        self.trilio_wlm_charm._wait_for_stable_db_connection()
+        expected_calls = (
+            self.trilio_wlm_charm._DB_STABLE_MAX_WAIT //
+            self.trilio_wlm_charm._DB_STABLE_POLL_INTERVAL
+        )
+        self.assertEqual(self._db_connection_ok.call_count, expected_calls)
+        self.log.assert_called_once()
