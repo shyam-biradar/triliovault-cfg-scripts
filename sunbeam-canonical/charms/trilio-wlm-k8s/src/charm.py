@@ -301,13 +301,20 @@ class TrilioWlmK8sCharm(ops.CharmBase):
         """Write requirer data to all relations. Idempotent — safe to call on every configure.
 
         Handles the case where relation-joined fired before the charm was working.
+        Only writes if not already set — avoids overwriting a live password that
+        rabbitmq-k8s has already provisioned (writing a new username triggers a
+        new password generation, causing an auth mismatch with the existing config).
         """
         if not self.unit.is_leader():
             return
         amqp_rel = self.model.get_relation("amqp")
-        if amqp_rel:
-            amqp_rel.data[self.app]["username"] = "wlm"
-            amqp_rel.data[self.app]["vhost"] = "wlm"
+        if amqp_rel and not amqp_rel.data[self.app].get("username"):
+            amqp_rel.data[self.app]["username"] = "workloadmgr"
+            amqp_rel.data[self.app]["vhost"] = "workloadmgr"
+        amqp_dms_rel = self.model.get_relation("amqp-dms")
+        if amqp_dms_rel and not amqp_dms_rel.data[self.app].get("username"):
+            amqp_dms_rel.data[self.app]["username"] = "workloadmgr"
+            amqp_dms_rel.data[self.app]["vhost"] = "workloadmgr"
         db_rel = self.model.get_relation("database")
         if db_rel and not db_rel.data[self.app].get("database"):
             db_rel.data[self.app]["database"] = "workloadmgr"
@@ -395,7 +402,7 @@ class TrilioWlmK8sCharm(ops.CharmBase):
         return None
 
     def _amqp_dms_data(self):
-        """rabbitmq-k8s: dmapi-vhost credentials for the DMS RPC channel (see amqp-dms relation)."""
+        """rabbitmq-k8s: workloadmgr-vhost credentials for the DMS RPC channel (see amqp-dms relation)."""
         rel = self.model.get_relation("amqp-dms")
         if not rel or not rel.app:
             return None
@@ -716,7 +723,7 @@ class TrilioWlmK8sCharm(ops.CharmBase):
             "cinder_production_endpoint_template": self.config["cinder-endpoint"],
             "nova_production_endpoint_template": self.config["nova-endpoint"],
             "neutron_production_url": self.config["neutron-endpoint"],
-            "rabbit_virtual_host": amqp.get("vhost", "wlm"),
+            "rabbit_virtual_host": amqp.get("vhost", "workloadmgr"),
             "log_dir": LOG_DIR,
             "debug": str(self.config["debug"]).lower(),
             "keystone_project_name": identity.get("service_tenant", "services"),
@@ -767,7 +774,7 @@ class TrilioWlmK8sCharm(ops.CharmBase):
         node_id targets this unit's own embedded DMS server (see _dms_node_id).
         Written once — all four WLM services share the same container filesystem.
         """
-        amqp_dms = self._amqp_data()
+        amqp = self._amqp_data()
         db = self._db_data()
 
         endpoint = db["endpoints"].split(",")[0].strip()
@@ -778,9 +785,9 @@ class TrilioWlmK8sCharm(ops.CharmBase):
             f"@{db_host}:{db_port}/{db['database']}"
         )
         rabbitmq_url = (
-            f"rabbit://{amqp_dms.get('username', 'workloadmgr')}:{amqp_dms['password']}"
-            f"@{amqp_dms['host']}:{amqp_dms.get('port', '5672')}"
-            f"/{amqp_dms.get('vhost', 'workloadmgr')}"
+            f"rabbit://{amqp.get('username', 'workloadmgr')}:{amqp['password']}"
+            f"@{amqp['host']}:{amqp.get('port', '5672')}"
+            f"/{amqp.get('vhost', 'workloadmgr')}"
         )
         context = {
             "rabbitmq_url": rabbitmq_url,
@@ -809,12 +816,12 @@ class TrilioWlmK8sCharm(ops.CharmBase):
         serves this one co-located WLM unit, so there's nothing to configure
         independently.
         """
-        amqp_dms = self._amqp_data()
+        amqp = self._amqp_data()
         identity = self._identity_data()
         rabbitmq_url = (
-            f"rabbit://{amqp_dms.get('username', 'workloadmgr')}:{amqp_dms['password']}"
-            f"@{amqp_dms['host']}:{amqp_dms.get('port', '5672')}"
-            f"/{amqp_dms.get('vhost', 'workloadmgr')}"
+            f"rabbit://{amqp.get('username', 'workloadmgr')}:{amqp['password']}"
+            f"@{amqp['host']}:{amqp.get('port', '5672')}"
+            f"/{amqp.get('vhost', 'workloadmgr')}"
         )
         auth_url = (
             f"{identity.get('service_protocol', 'http')}://"
