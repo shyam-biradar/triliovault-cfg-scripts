@@ -11,8 +11,13 @@
 #   rhosp_release Release suffix matching the Dockerfile name, e.g. rhosp17.1
 #   container     (optional) Build only this container:
 #                   trilio-wlm | trilio-datamover-api |
-#                   trilio-datamover | trilio-horizon-plugin
-#                 If omitted, all 4 containers are built.
+#                   trilio-datamover | trilio-horizon-plugin | trilio-dms
+#                 If omitted, all containers are built. A container whose
+#                 Dockerfile_<rhosp_release> does not exist is skipped.
+#                 trilio-dms is the exception: it is a 6.2 RHOSO18-only
+#                 service and ships a single release-agnostic Dockerfile,
+#                 so it is taken from that file and built only when
+#                 rhosp_release is rhoso18.0.
 #
 # Environment variables (required):
 #   RPM_REPO_URL  Trilio RPM repo baseurl, substituted into trilio.repo
@@ -31,13 +36,14 @@ Usage: $0 <tag> <rhosp_release> [container]
   tag           Docker image tag, e.g. tv7336
   rhosp_release Release suffix used in Dockerfile name, e.g. rhosp17.1
   container     (optional) Build and publish a single container.
-                If omitted, all 4 containers are built.
+                If omitted, all containers are built.
 
 Containers:
   trilio-wlm              Workload Manager
   trilio-datamover-api    Control plane Datamover API
   trilio-datamover        Compute node Datamover
   trilio-horizon-plugin   OpenStack Horizon UI plugin
+  trilio-dms              Dynamic Mount Service (rhoso18.0 only)
 
 Environment variables (required):
   RPM_REPO_URL  Trilio RPM repo baseurl (substituted into trilio.repo)
@@ -48,6 +54,7 @@ Published image format:
 Examples:
   RPM_REPO_URL='https://...' $0 tv7336 rhosp17.1
   RPM_REPO_URL='https://...' $0 tv7336 rhosp17.1 trilio-datamover
+  RPM_REPO_URL='https://...' $0 tv7655 rhoso18.0 trilio-dms
 
 Options:
   -h, --help   Show this help message and exit.
@@ -75,7 +82,7 @@ if [ -z "${RPM_REPO_URL:-}" ]; then
     exit 1
 fi
 
-ALL_CONTAINERS=(trilio-wlm trilio-datamover-api trilio-datamover trilio-horizon-plugin)
+ALL_CONTAINERS=(trilio-wlm trilio-datamover-api trilio-datamover trilio-horizon-plugin trilio-dms)
 
 if [ -n "$SINGLE_CONTAINER" ]; then
     valid=0
@@ -113,7 +120,18 @@ for CONTAINER in "${ALL_CONTAINERS[@]}"; do
         continue
     fi
 
-    SOURCE_DF="$BASE_DIR/$CONTAINER/Dockerfile_${RHOSP_RELEASE}"
+    if [ "$CONTAINER" = "trilio-dms" ]; then
+        # DMS is RHOSO18-only and ships one release-agnostic Dockerfile,
+        # unlike the other containers which carry a Dockerfile per release.
+        if [ "$RHOSP_RELEASE" != "rhoso18.0" ]; then
+            echo ""
+            echo "SKIP: $CONTAINER — built only for rhoso18.0 (requested: $RHOSP_RELEASE)"
+            continue
+        fi
+        SOURCE_DF="$BASE_DIR/$CONTAINER/Dockerfile"
+    else
+        SOURCE_DF="$BASE_DIR/$CONTAINER/Dockerfile_${RHOSP_RELEASE}"
+    fi
 
     if [ ! -f "$SOURCE_DF" ]; then
         echo ""
