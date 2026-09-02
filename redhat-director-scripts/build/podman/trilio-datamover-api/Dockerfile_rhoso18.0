@@ -1,0 +1,53 @@
+FROM registry.redhat.io/rhoso/openstack-base-rhel9:18.0
+
+MAINTAINER TrilioData shyam.biradar@trilio.io
+
+LABEL name="rhosp16/openstack-nova-api-triliodata-plugin" \
+      maintainer="shyam.biradar@trilio.io" \
+      vendor="TrilioData" \
+      version="6.0.0" \
+      release="6.0" \
+      summary="Red Hat OpenStack Platform 18 nova-api TrilioData trilio-datamover-api" \
+      description="Red Hat OpenStack Platform 18 nova-api TrilioData trilio-datamover-api"
+
+# switch to root and install a custom RPM, etc.
+USER root
+
+##Install datamover packages
+RUN dnf clean all && dnf config-manager --set-disabled \*
+ADD trilio.repo /etc/yum.repos.d/
+
+RUN dnf config-manager \
+  --enable rhel-9-for-x86_64-baseos-eus-rpms \
+  --enable rhel-9-for-x86_64-appstream-eus-rpms \
+  --enable rhel-9-for-x86_64-highavailability-eus-rpms \
+  --enable fast-datapath-for-rhel-9-x86_64-rpms \
+  --enable rhceph-7-tools-for-rhel-9-x86_64-rpms \
+  --enable rhoso-18.0-for-rhel-9-x86_64-rpms
+
+
+RUN dnf --releasever 9.6 -y install python3-nova python3-retrying mysql python3-openstackclient httpd mod_ssl net-tools
+RUN dnf install --releasever 9.6 python3-dmapi-el9 python3-trilio-dms-el9 -y && chown -R dmapi:dmapi /run/httpd/ \
+    && sed -i '/^Listen /c\Listen 8784' /etc/httpd/conf/httpd.conf && chown -R dmapi:root /var/log/httpd \
+    && chown -R dmapi:root /var/www && chown -R dmapi:root /etc/httpd && chown -R dmapi:dmapi /var/cache/httpd 
+RUN curl -o /usr/local/bin/rabbitmqadmin https://raw.githubusercontent.com/rabbitmq/rabbitmq-server/v3.12.x/deps/rabbitmq_management/bin/rabbitmqadmin && chmod +x /usr/local/bin/rabbitmqadmin
+RUN dnf --releasever 9.6 -y update-minimal --security --sec-severity=Important --sec-severity=Critical --nobest --skip-broken
+RUN rm -f /etc/yum.repos.d/trilio.repo
+RUN usermod -a -G kolla dmapi && rm -f /etc/httpd/conf.d/ssl.conf
+
+##Disable repos and Clean subscription
+RUN dnf config-manager \
+    --disable rhel-9-for-x86_64-baseos-eus-rpms \
+    --disable rhel-9-for-x86_64-appstream-eus-rpms \
+    --disable rhel-9-for-x86_64-highavailability-eus-rpms \
+    --disable fast-datapath-for-rhel-9-x86_64-rpms \
+    --disable rhceph-7-tools-for-rhel-9-x86_64-rpms \
+    --disable rhoso-18.0-for-rhel-9-x86_64-rpms
+RUN dnf clean all
+
+##Copy license file
+RUN mkdir /licenses
+COPY licensing.txt /licenses
+
+##Become nova user for further operations
+USER dmapi
